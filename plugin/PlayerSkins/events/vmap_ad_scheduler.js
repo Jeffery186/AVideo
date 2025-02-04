@@ -1,12 +1,3 @@
-// Queue to track skipped ads
-let skippedAdsQueue = [];
-
-// Array to store scheduled ad times
-let scheduledAdTimes = [];
-
-// Dynamic interval for live ads
-let liveAdInterval = null;
-
 // Fetch and parse VMAP
 if (typeof _adTagUrl === 'string') {
     fetch(_adTagUrl)
@@ -17,8 +8,8 @@ if (typeof _adTagUrl === 'string') {
             var adBreaks = xmlDoc.getElementsByTagName('vmap:AdBreak');
             Array.from(adBreaks).forEach(adBreak => {
                 var timeOffset = adBreak.getAttribute('timeOffset');
-                console.log('timeOffset found', timeOffset);
-
+                //console.log('vmap_ad_scheduler: timeOffset found', timeOffset);
+                console.log('ADs: timeOffset found', timeOffset);
                 if (timeOffset === 'start') {
                     scheduledAdTimes.push(0);
                 } else if (timeOffset === 'end') {
@@ -29,112 +20,40 @@ if (typeof _adTagUrl === 'string') {
                 }
             });
         })
-        .catch(error => console.error('Error fetching VMAP:', error));
-}
-
-// Convert timeOffset to seconds
-function convertTimeOffsetToSeconds(timeOffset) {
-    var parts = timeOffset.split(':');
-    return parts.length === 3
-        ? parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseInt(parts[2], 10)
-        : parts.length === 2
-            ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)
-            : 0;
-}
-
-// Ensure ad display container is initialized on mobile
-function initializeAdContainer() {
-    if (player.ima && typeof player.ima.initializeAdDisplayContainer === "function") {
-        console.log(`initializeAdContainer: Initializing ad container`);
-        player.ima.initializeAdDisplayContainer();
-    }
-}
-
-// Function to dynamically schedule ads
-function scheduleAd(seconds) {
-    if (player.liveTracker && player.liveTracker.isLive()) {
-        liveAdInterval = seconds; // Set live ad interval dynamically
-        console.log(`Live ad interval set to ${seconds} seconds`);
-        setupLiveAdInterval();
-    } else {
-        scheduledAdTimes.push(seconds);
-    }
-}
-
-// Function to set up live ad interval
-function setupLiveAdInterval() {
-    if (liveAdInterval && player.liveTracker && player.liveTracker.isLive()) {
-        setInterval(() => {
-            console.log(`Triggering live ad every ${liveAdInterval} seconds`);
-            try {
-                initializeAdContainer();
-                player.ima.requestAds();
-            } catch (error) {
-                console.error(`Error triggering live ad: ${error.message}`);
-            }
-        }, liveAdInterval * 1000);
-    }
-}
-
-// Function to check and play ads based on current time
-function checkAndPlayAds() {
-    const currentTime = player.currentTime();
-    scheduledAdTimes = scheduledAdTimes.filter(adTime => {
-        if (adTime === 'end') return true; // Keep the "end" marker for later handling
-        if (currentTime >= adTime) {
-            console.log(`Triggering ad scheduled for ${adTime} seconds`);
-            try {
-                initializeAdContainer();
-                player.ima.requestAds();
-            } catch (error) {
-                console.error(`Error triggering ad at ${adTime} seconds: ${error.message}`);
-            }
-            return false; // Remove this ad time as it has been triggered
-        }
-        return true;
-    });
-}
-
-// Function to check if an ad is playing
-function checkIfAdIsPlaying() {
-    console.log('Is an ad playing?', isAdPlaying);
-    return isAdPlaying;
-}
-
-function fixAdPlaying(){
-    if(isAdPlaying){
-        if (!player.paused()) {
-            console.log('fixAdPlaying: Pausing main video');
-            player.pause(); // Pause the main video
-        }
-    }else{
-        if (player.paused()) {
-            console.log('fixAdPlaying: Resuming main video');
-            player.play(); // Resume the main video
-        }
-    }
+        .catch(error => console.error('vmap_ad_scheduler: Error fetching VMAP:', error));
 }
 
 // Set up event listener to check ad triggers on time updates
 player.on('timeupdate', () => {
-    checkAndPlayAds();
+    //console.log(`vmap_ad_scheduler: checkAndPlayAds timeupdate.`, player.currentTime());
+    //checkAndPlayAds();
 });
 
 // Handle ads at the end of the video
 player.on('ended', () => {
     if (scheduledAdTimes.includes('end')) {
-        console.log('Playing ad at the end of the video');
+        console.log('vmap_ad_scheduler: Playing ad at the end of the video');
         try {
             initializeAdContainer();
             player.ima.requestAds();
         } catch (error) {
-            console.error(`Error triggering ad at the end of the video: ${error.message}`);
+            console.error(`vmap_ad_scheduler: Error triggering ad at the end of the video: ${error.message}`);
         }
     }
 });
 
 // Play skipped ads when the video resumes
 player.on('play', () => {
+    if(forceUserClickToPlayAdAdding){
+        forceUserClickToPlayAdAdding = false;
+        $('#forceUserClickToPlayAdAdOverlay').remove(); // Remove overlay when play button is clicked
+        console.log('vmap_ad_scheduler: User clicked play, removing overlay.');
+        player.play();
+        initializeAdContainer();
+        player.ima.requestAds(); // Try to play the ad again
+    }else{
+        console.log('vmap_ad_scheduler: forceUserClickToPlayAdAdding.', forceUserClickToPlayAdAdding);
+    }
     while (skippedAdsQueue.length > 0) {
         const playSkippedAd = skippedAdsQueue.shift();
         playSkippedAd();
@@ -143,25 +62,59 @@ player.on('play', () => {
 
 player.on('ads-ad-started', () => {
     isAdPlaying = true;
-    console.log('Ad started playing');
+    console.log('vmap_ad_scheduler: Ad started playing', player.currentTime());
     fixAdPlaying();
 });
 
 // Listen for ad end event to resume the main video
 player.on('ads-ad-ended', () => {
     isAdPlaying = false;
-    console.log('Ad finished playing');    
+    console.log('vmap_ad_scheduler: Ad finished playing');
     fixAdPlaying();
 });
 
 // Listen for ad error and reset playback states if needed
 player.on('adserror', () => {
     isAdPlaying = false;
-    console.log('Ad playback encountered an error, resuming main video if paused');
+    console.log('vmap_ad_scheduler: Ad playback encountered an error, resuming main video if paused');
     fixAdPlaying();
 });
 
 // Example usage
-player.on('ads-manager', function(response) {
-    console.log('Ads manager ready:', response.adsManager);
+player.on('ads-manager', function (response) {
+    var adsManager = response.adsManager;
+    var cuePoints = adsManager.getCuePoints();
+    console.log('vmap_ad_scheduler: Ads manager ready - Cue Points:', cuePoints);
+
+    // Check for empty ad slots inside VMAP
+    if (!cuePoints || cuePoints.length === 0) {
+        console.warn('vmap_ad_scheduler: No ads found inside VMAP, skipping ad slot');
+        player.play(); // Resume video since no ads are available
+    }
+});
+
+
+// Detect when a VAST request is made inside VMAP
+player.on('ads-request', function (event) {
+    console.log('vmap_ad_scheduler: Ad request sent to VAST URL:', event);
+});
+
+// Detect when a VAST response is received inside VMAP
+player.on('ads-response', function (event) {
+    console.log('vmap_ad_scheduler: VAST response received:', event);
+
+    var adsManager = event.adsManager;
+
+    if (!adsManager || !adsManager.getCuePoints || adsManager.getCuePoints().length === 0) {
+        console.warn('vmap_ad_scheduler: VAST response has NO ADS, resuming video');
+        player.play(); // Resume the main video if no ads are available
+    } else {
+        console.log('vmap_ad_scheduler: VAST response contains ads:', adsManager.getCuePoints());
+    }
+});
+
+// Handle errors in case VAST fails to load ads
+player.on('ads-error', function (event) {
+    console.error('vmap_ad_scheduler: VAST Ad Error:', event);
+    player.play(); // Resume video if there's an ad error
 });

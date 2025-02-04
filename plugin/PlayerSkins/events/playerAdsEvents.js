@@ -1,4 +1,3 @@
-var adsRetry = 0;
 setInterval(function () { fixAdSize(); }, 300);
 
 async function logAdEvent(eventType) {
@@ -23,7 +22,7 @@ async function logAdEvent(eventType) {
 
 player.on('adsready', function () {
     console.log('ADS: adsready');
-    
+
     // Set listener for ad break ready
     player.ima.setAdBreakReadyListener(function (e) {
         if (!_adWasPlayed) {
@@ -44,7 +43,7 @@ player.on('adsready', function () {
     var adsManager = player.ima.getAdsManager();
 
     adsManager.addEventListener(google.ima.AdEvent.Type.STARTED, function () {
-        console.log('ADS: IMA SDK: Ad started.');
+        console.log('ADS: IMA SDK: vmap_ad_scheduler: Ad started.');
         logAdEvent('AdStarted');
     });
 
@@ -66,6 +65,7 @@ player.on('adsready', function () {
     adsManager.addEventListener(google.ima.AdEvent.Type.COMPLETE, function () {
         console.log('ADS: IMA SDK: Ad completed.');
         logAdEvent('AdCompleted');
+        isAdPlaying = false;
         player.play();
     });
 
@@ -82,7 +82,7 @@ player.on('adsready', function () {
     adsManager.addEventListener(google.ima.AdEvent.Type.SKIPPED, function () {
         console.log('ADS: IMA SDK: Ad skipped.');
         logAdEvent('AdSkipped');
-        player.play();
+        //player.play();
     });
 
     adsManager.addEventListener(google.ima.AdEvent.Type.CLICK, function () {
@@ -91,7 +91,7 @@ player.on('adsready', function () {
     });
 
     adsManager.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, function (event) {
-        console.error('ADS: IMA SDK: Ad error occurred:', event.getError());
+        console.error('ADS: IMA SDK: vmap_ad_scheduler: Ad error occurred:', event.getError());
         logAdEvent('AdError', { error: event.getError() });
 
         if (adsRetry === 0) {
@@ -99,13 +99,44 @@ player.on('adsready', function () {
             preloadVmapAndUpdateAdTag(_adTagUrl); // Retry ad if error
         }
     });
+
+    adsManager.addEventListener(google.ima.AdEvent.Type.LOADED, function (event) {
+        console.log('vmap_ad_scheduler: Ad loaded successfully');
+    });
+
+    adsManager.addEventListener(google.ima.AdEvent.Type.ALL_ADS_COMPLETED, function () {
+        console.log('vmap_ad_scheduler: All ads completed');
+        isAdPlaying = false;
+    });
+
+    adsManager.addEventListener(google.ima.AdEvent.Type.AD_ERROR, function (event) {
+        console.error('vmap_ad_scheduler: Error loading ad:', event.getError());
+        isAdPlaying = false;
+        player.play(); // Resume main content if ad fails
+    });
+
+    adsManager.addEventListener(google.ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, function (event) {
+        console.log('vmap_ad_scheduler: Ads Manager Loaded');
+
+        var adsManager = event.getAdsManager(player);
+        var cuePoints = adsManager.getCuePoints();
+
+        if (!cuePoints || cuePoints.length === 0) {
+            console.warn('vmap_ad_scheduler: No ads found in VAST response');
+            isAdPlaying = false;
+            player.play(); // Resume main content
+        } else {
+            console.log('vmap_ad_scheduler: Ad slots found:', cuePoints);
+        }
+    });
+
 });
 
 // Event fired if there's an error during ad playback
 player.on('adserror', function(event) {
-    console.log('ADS: error:', event.data.AdError);
+    console.log('vmap_ad_scheduler: ADS: error:', event.data.AdError);
     logAdEvent('AdError', { error: event.data.AdError });
-    
+
     if (adsRetry === 0) {
         adsRetry++;
         preloadVmapAndUpdateAdTag(_adTagUrl);
